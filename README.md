@@ -1,12 +1,12 @@
 # Daily Habits
 
-A simple, private habit tracker for student habit-building projects. Students choose three daily habits, mark their progress on a monthly grid, and export their data as CSV for submission or safekeeping.
+A simple, private habit tracker for student habit-building projects. Students start with three daily habits, can add or remove habits as needed, mark their progress, and export their data as CSV for submission or safekeeping.
 
 ## Features
 
 - No account, ads, or paid features
 - Data stays in the browser's local storage
-- Daily check-in cards and a complete monthly grid
+- Daily check-in cards, a mobile weekly view, and a desktop monthly grid
 - Streaks and monthly completion rates
 - One-to-six editable habits
 - CSV export from the project's first day through today

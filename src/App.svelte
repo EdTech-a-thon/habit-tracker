@@ -14,11 +14,16 @@
     type TrackerData,
   } from './lib/tracker'
 
+  type View = 'today' | 'history'
+
   const today = new Date()
   const todayKey = dateKey(today)
+  const thisWeek = addDays(today, -today.getDay())
 
   let data = $state<TrackerData | null>(loadTrackerData())
+  let view = $state<View>('today')
   let monthCursor = $state(new Date(today.getFullYear(), today.getMonth(), 1))
+  let weekCursor = $state(new Date(thisWeek.getFullYear(), thisWeek.getMonth(), thisWeek.getDate()))
   let setupTitle = $state('My Habit Project')
   let setupDate = $state(todayKey)
   let setupHabits = $state(['', '', ''])
@@ -31,8 +36,22 @@
   let toastTimer: ReturnType<typeof setTimeout> | undefined
 
   let monthDates = $derived(daysInMonth(monthCursor))
+  let weekDates = $derived(Array.from({ length: 7 }, (_, index) => addDays(weekCursor, index)))
   let monthLabel = $derived(
     monthCursor.toLocaleDateString(undefined, { month: 'long', year: 'numeric' }),
+  )
+  let weekLabel = $derived.by(() => {
+    const end = addDays(weekCursor, 6)
+    const startLabel = weekCursor.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    const endLabel = end.toLocaleDateString(undefined, {
+      month: end.getMonth() === weekCursor.getMonth() ? undefined : 'short',
+      day: 'numeric',
+    })
+    return `${startLabel}–${endLabel}`
+  })
+  let canGoNextWeek = $derived(dateKey(weekCursor) < dateKey(thisWeek))
+  let canGoPreviousWeek = $derived(
+    !!data && dateKey(addDays(weekCursor, -1)) >= data.startDate,
   )
   let canGoNext = $derived(
     monthCursor.getFullYear() < today.getFullYear() ||
@@ -113,11 +132,11 @@
     event.preventDefault()
     const names = setupHabits.map((name) => name.trim())
     if (names.some((name) => !name)) {
-      setupError = 'Give each of your three habits a short name.'
+      setupError = 'Give each habit a short name.'
       return
     }
     if (new Set(names.map((name) => name.toLowerCase())).size !== names.length) {
-      setupError = 'Choose three different habits so your tracker stays clear.'
+      setupError = 'Choose different habits so your tracker stays clear.'
       return
     }
     data = {
@@ -134,8 +153,21 @@
     monthCursor = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + amount, 1)
   }
 
+  function changeWeek(amount: number): void {
+    weekCursor = addDays(weekCursor, amount * 7)
+  }
+
   function goToToday(): void {
     monthCursor = new Date(today.getFullYear(), today.getMonth(), 1)
+    weekCursor = new Date(thisWeek.getFullYear(), thisWeek.getMonth(), thisWeek.getDate())
+  }
+
+  function addSetupHabit(): void {
+    if (setupHabits.length < 6) setupHabits.push('')
+  }
+
+  function removeSetupHabit(index: number): void {
+    if (setupHabits.length > 1) setupHabits.splice(index, 1)
   }
 
   function openSettings(): void {
@@ -184,6 +216,7 @@
     setupTitle = 'My Habit Project'
     setupDate = todayKey
     setupHabits = ['', '', '']
+    view = 'today'
   }
 
   function exportCsv(): void {
@@ -228,7 +261,7 @@
       <div class="setup-intro">
         <p class="eyebrow">Small steps, visible progress</p>
         <h1 id="setup-heading">Build a routine<br />one day at a time.</h1>
-        <p>Choose three things you want to practice. Check them off each day and watch your consistency grow.</p>
+        <p>Choose a few things you want to practice. Check them off each day and watch your consistency grow.</p>
       </div>
 
       <form class="setup-form" onsubmit={finishSetup}>
@@ -238,22 +271,28 @@
         </label>
 
         <fieldset>
-          <legend>Your three daily habits</legend>
-          <p class="field-help">Keep them specific and doable.</p>
+          <legend>Your daily habits</legend>
+          <p class="field-help">Start with three, or track between one and six.</p>
           <div class="habit-inputs">
             {#each setupHabits as _, index}
-              <label class="habit-input">
-                <span class="color-dot" style:--habit-color={HABIT_COLORS[index]}></span>
-                <span class="sr-only">Habit {index + 1}</span>
-                <input
-                  bind:value={setupHabits[index]}
-                  placeholder={['Read for 20 minutes', 'Drink 6 glasses of water', 'Practice an instrument'][index]}
-                  maxlength="50"
-                  autocomplete="off"
-                />
-              </label>
+              <div class="setup-habit-row">
+                <label class="habit-input">
+                  <span class="color-dot" style:--habit-color={HABIT_COLORS[index]}></span>
+                  <span class="sr-only">Habit {index + 1}</span>
+                  <input
+                    bind:value={setupHabits[index]}
+                    placeholder={['Read for 20 minutes', 'Drink 6 glasses of water', 'Practice an instrument'][index] ?? 'Another daily habit'}
+                    maxlength="50"
+                    autocomplete="off"
+                  />
+                </label>
+                <button class="remove-setup-habit" type="button" onclick={() => removeSetupHabit(index)} disabled={setupHabits.length === 1} aria-label={`Remove habit ${index + 1}`}>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
+                </button>
+              </div>
             {/each}
           </div>
+          <button class="add-button" type="button" onclick={addSetupHabit} disabled={setupHabits.length >= 6}>+ Add another habit</button>
         </fieldset>
 
         <label class="start-date-field">
@@ -287,18 +326,15 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14" /></svg>
           <span>Export CSV</span>
         </button>
-        <button class="icon-button" type="button" onclick={openSettings} aria-label="Open settings">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.57 19a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.2 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4h-.1v-4h.1A1.7 1.7 0 0 0 4.4 8.57a1.7 1.7 0 0 0-.34-1.88L4 6.63 6.83 3.8l.06.06A1.7 1.7 0 0 0 8.57 4.2a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1v-.1h4v.1A1.7 1.7 0 0 0 15 4.4a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 8.6a1.7 1.7 0 0 0 .6 1 1.7 1.7 0 0 0 1.1.4h.1v4h-.1a1.7 1.7 0 0 0-1.7 1Z" /></svg>
-        </button>
       </div>
     </header>
 
     <main class="dashboard">
+      {#if view === 'today'}
       <section class="welcome-row">
         <div>
           <p class="eyebrow">{today.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</p>
           <h1>{data.title}</h1>
-          <p>Every checkmark is a vote for the person you want to become.</p>
         </div>
         <div class="today-ring" style:--progress={`${todayPercent * 3.6}deg`} aria-label={`${todayPercent}% complete today`}>
           <div><strong>{todayCompleted}/{data.habits.length}</strong><span>today</span></div>
@@ -309,7 +345,7 @@
         <div class="section-heading">
           <div>
             <p class="eyebrow">Daily check-in</p>
-            <h2 id="today-heading">Today</h2>
+            <h2 id="today-heading">Today's habits</h2>
           </div>
           {#if todayCompleted === data.habits.length}
             <span class="complete-badge">All done — nice work!</span>
@@ -339,12 +375,19 @@
           {/each}
         </div>
       </section>
+      {:else}
+      <section class="history-heading">
+        <div>
+          <p class="eyebrow">Your record</p>
+          <h1>History</h1>
+          <p>Review your progress or fill in a day you missed.</p>
+        </div>
+      </section>
 
       <section class="tracker-section" aria-labelledby="tracker-heading">
         <div class="tracker-header">
           <div>
-            <p class="eyebrow">Your record</p>
-            <h2 id="tracker-heading">Monthly tracker</h2>
+            <h2 id="tracker-heading"><span class="desktop-only">Monthly tracker</span><span class="mobile-only">Weekly tracker</span></h2>
           </div>
           <div class="month-controls">
             <button class="icon-button small" type="button" onclick={() => changeMonth(-1)} disabled={!canGoPrevious} aria-label="Previous month">
@@ -361,7 +404,7 @@
           </div>
         </div>
 
-        <div class="tracker-scroll">
+        <div class="tracker-scroll desktop-month">
           <table>
             <thead>
               <tr>
@@ -404,22 +447,63 @@
             </tbody>
           </table>
         </div>
+        <div class="mobile-week">
+          <div class="week-controls">
+            <button class="icon-button small" type="button" onclick={() => changeWeek(-1)} disabled={!canGoPreviousWeek} aria-label="Previous week">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+            </button>
+            <button class="month-label" type="button" onclick={goToToday} title="Return to this week">{weekLabel}</button>
+            <button class="icon-button small" type="button" onclick={() => changeWeek(1)} disabled={!canGoNextWeek} aria-label="Next week">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
+            </button>
+          </div>
+          <div class="week-grid">
+            <div class="week-corner">Habit</div>
+            {#each weekDates as day}
+              {@const key = dateKey(day)}
+              <div class:today={key === todayKey} class="week-day-heading">
+                <span>{day.toLocaleDateString(undefined, { weekday: 'narrow' })}</span>
+                <strong>{day.getDate()}</strong>
+              </div>
+            {/each}
+            {#each data.habits as habit (habit.id)}
+              <div class="week-habit" style:--habit-color={habit.color}><span class="color-dot"></span><span>{habit.name}</span></div>
+              {#each weekDates as day}
+                {@const key = dateKey(day)}
+                {@const available = isAvailable(key)}
+                {@const checked = isComplete(key, habit.id)}
+                <div class:today={key === todayKey} class="week-cell" style:--habit-color={habit.color}>
+                  <button class="day-check" class:checked type="button" disabled={!available} onclick={() => toggleHabit(key, habit.id)} aria-label={`${checked ? 'Uncheck' : 'Check'} ${habit.name} on ${day.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}`} aria-pressed={checked}>
+                    {#if checked}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 12 4 4 8-9" /></svg>{/if}
+                  </button>
+                </div>
+              {/each}
+            {/each}
+          </div>
+          <p class="week-help">Future days unlock as you go.</p>
+        </div>
         <div class="tracker-footer">
           <p>Scroll sideways to see the full month.</p>
           <p><span class="mini-lock" aria-hidden="true">●</span> Future days unlock as you go.</p>
         </div>
       </section>
-
-      <section class="data-note">
-        <div class="data-icon">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V8a5 5 0 0 1 10 0v2M6 10h12v10H6z" /></svg>
-        </div>
-        <div><strong>Your progress belongs to you.</strong><p>It is saved only in this browser. Export a CSV anytime to turn in your work or keep a copy.</p></div>
-        <button class="text-button" type="button" onclick={exportCsv}>Download my data <span aria-hidden="true">→</span></button>
-      </section>
+      {/if}
     </main>
 
-    <footer><span>Daily Habits</span><span>Private by design · No sign-in · No ads</span></footer>
+    <nav class="bottom-nav" aria-label="Main views">
+      <button type="button" aria-current={view === 'today' ? 'page' : undefined} onclick={() => (view = 'today')}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20h-5v-6H9v6H4z" /></svg>
+        <span>Today</span>
+      </button>
+      <button type="button" aria-current={view === 'history' ? 'page' : undefined} onclick={() => (view = 'history')}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4v3M19 4v3M4 9h16M5 6h14a1 1 0 0 1 1 1v13H4V7a1 1 0 0 1 1-1Z" /></svg>
+        <span>History</span>
+      </button>
+      <button type="button" aria-current={settingsOpen ? 'page' : undefined} onclick={openSettings}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" /><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A7 7 0 0 0 14.8 6l-.3-2.6h-4L10.2 6a7 7 0 0 0-1.7 1.1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a7 7 0 0 0 1.7 1.1l.3 2.6h4l.3-2.6a7 7 0 0 0 1.7-1.1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z" /></svg>
+        <span>Settings</span>
+      </button>
+    </nav>
   </div>
 {/if}
 
